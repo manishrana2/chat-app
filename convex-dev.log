@@ -1,0 +1,21 @@
+- Preparing Convex functions...
+
+[32m✔[39m 08:16:55 Convex functions ready! (4.78s)
+- Preparing Convex functions...
+
+[32m✔[39m 08:19:23 Convex functions ready! (4.57s)
+2/25/2026, 8:21:03 AM [CONVEX M(messages:sendMessage)] Uncaught Error: Cannot send message until friend request is accepted
+    at handler (../convex/messages.ts:38:4)
+
+2/25/2026, 8:33:18 AM [CONVEX M(messages:sendMessage)] Uncaught Error: Cannot send message until friend request is accepted
+    at handler (../convex/messages.ts:38:4)
+
+2/25/2026, 8:33:21 AM [CONVEX M(messages:sendMessage)] Uncaught Error: Cannot send message until friend request is accepted
+    at handler (../convex/messages.ts:38:4)
+
+2/25/2026, 8:33:22 AM [CONVEX M(messages:sendMessage)] Uncaught Error: Cannot send message until friend request is accepted
+    at handler (../convex/messages.ts:38:4)
+
+2/25/2026, 8:33:23 AM [CONVEX M(messages:sendMessage)] Uncaught Error: Cannot send message until friend request is accepted
+    at handler (../convex/messages.ts:38:4)
+
