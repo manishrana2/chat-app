@@ -1,5 +1,7 @@
 # 🚀 WhatsApp-like Chat Application
 
+> **Note:** This demo now uses custom auth. To enable password reset emails configure a service such as SendGrid and set `SENDGRID_API_KEY` in your environment (see below).
+
 A **full-featured real-time chat application** built with **Next.js**, **React**, **Convex**, and **Clerk** - featuring voice messages, video calls, and more.
 
 ## ✨ Features
@@ -72,6 +74,8 @@ npm install
 # Setup environment variables
 cp .env.example .env.local
 # Add your Clerk and Convex API keys to .env.local
+# For password reset to actually send messages, add SendGrid key as well:
+# SENDGRID_API_KEY=your_key_here
 
 # Initialize Convex
 npx convex dev

@@ -12,11 +12,12 @@ export default defineSchema({
   phone: v.optional(v.string()),
   password: v.optional(v.string()), // hashed password for custom auth
   isOnline: v.boolean(),
+  lastSeen: v.optional(v.number()),
   friends: v.optional(v.array(v.string())), // list of friend user IDs
   blockedUsers: v.optional(v.array(v.string())), // list of user IDs that this user has blocked/unfriended
-  resetToken: v.optional(v.string()), // for password reset
-  resetTokenExpiry: v.optional(v.number()), // timestamp when token expires
-}).index("by_username", ["username"]).index("by_email", ["email"]).index("by_resetToken", ["resetToken"]),
+  resetOtp: v.optional(v.string()), // for password reset OTP
+  resetOtpExpiry: v.optional(v.number()), // timestamp when OTP expires
+}).index("by_username", ["username"]).index("by_email", ["email"]),
 
   conversations: defineTable({
     members: v.array(v.string()),
@@ -66,6 +67,7 @@ export default defineSchema({
     deletedAt: v.optional(v.number()),
     isPinned: v.optional(v.boolean()),
     isForwarded: v.optional(v.boolean()),
+    expiresAt: v.optional(v.number()),
     createdAt: v.number(),
   }),
 

@@ -10,6 +10,11 @@ interface AuthUser {
   name: string;
   email?: string;
   image?: string;
+  bio?: string;
+  friends?: string[];
+  lastSeen?: number;
+  // additional fields may be added dynamically
+  [key: string]: any;
 }
 
 interface AuthContextType {

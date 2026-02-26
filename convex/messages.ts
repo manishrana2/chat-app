@@ -5,11 +5,13 @@ export const sendMessage = mutation({
   args: {
     conversationId: v.id("conversations"),
     senderId: v.string(),
-    text: v.string(),
+    text: v.optional(v.string()),
     mediaType: v.optional(v.string()),
     mediaUrl: v.optional(v.string()),
     isVoice: v.optional(v.boolean()),
     replyTo: v.optional(v.id("messages")),
+    encryptedText: v.optional(v.string()),
+    encryptionIv: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Authorization: ensure sender is a member of the conversation
@@ -23,11 +25,13 @@ export const sendMessage = mutation({
     const msgId = await ctx.db.insert("messages", {
       conversationId: args.conversationId,
       senderId: args.senderId,
-      text: args.text,
+      text: args.text || "",
       mediaType: args.mediaType,
       mediaUrl: args.mediaUrl,
       isVoice: args.isVoice,
       replyTo: args.replyTo,
+      encryptedText: args.encryptedText,
+      encryptionIv: args.encryptionIv,
       status: "sent",
       deliveredTo: [],
       readBy: [],
@@ -115,6 +119,8 @@ export const editMessage = mutation({
     messageId: v.id("messages"),
     senderId: v.string(),
     text: v.optional(v.string()),
+    encryptedText: v.optional(v.string()),
+    encryptionIv: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const msg = await ctx.db.get(args.messageId);
@@ -129,6 +135,8 @@ export const editMessage = mutation({
     }
     await ctx.db.patch(args.messageId, {
       text: args.text,
+      encryptedText: args.encryptedText,
+      encryptionIv: args.encryptionIv,
       editedAt: Date.now(),
     });
     return true;
@@ -266,6 +274,57 @@ export const getReactionsForMessage = query({
   },
 });
 
+export const getReactionsForConversation = query({
+  args: { conversationId: v.id("conversations") },
+  handler: async (ctx, args) => {
+    // collect messages for conversation
+    const msgs = await ctx.db
+      .query("messages")
+      .filter((q) => q.eq(q.field("conversationId"), args.conversationId))
+      .collect();
+
+    const messageIds = msgs.map((m: any) => m._id);
+
+    // collect reactions for message ids (build OR filters)
+    let reactions: any[] = [];
+    if (messageIds.length === 0) {
+      reactions = [];
+    } else {
+      // build a filter that ORs equality checks for each messageId
+      const q0 = ctx.db.query("reactions");
+      let builder = q0.filter((f) => f.eq(f.field("messageId"), messageIds[0]));
+      for (let i = 1; i < messageIds.length; i++) {
+        const id = messageIds[i];
+        builder = builder.filter((f) => f.or(f.eq(f.field("messageId"), id), f.eq(f.field("messageId"), id)));
+      }
+      reactions = await builder.collect();
+    }
+
+    const groupedByMessage: Record<string, any[]> = {};
+    reactions.forEach((r: any) => {
+      const msgId = String(r.messageId);
+      if (!groupedByMessage[msgId]) groupedByMessage[msgId] = [];
+      groupedByMessage[msgId].push(r);
+    });
+
+    // reduce to a compact structure per message
+    const result: Record<string, any> = {};
+    Object.keys(groupedByMessage).forEach((mid) => {
+      const arr = groupedByMessage[mid];
+      const grouped: Record<string, { emoji: string; count: number; userIds: string[] }> = {};
+      arr.forEach((r: any) => {
+        const emoji = r.emoji;
+        if (!grouped[emoji]) grouped[emoji] = { emoji, count: 0, userIds: [] };
+        grouped[emoji].count++;
+        grouped[emoji].userIds.push(r.userId);
+      });
+      result[mid] = Object.values(grouped);
+    });
+
+    return result;
+  },
+});
+
 // Message pinning
 export const pinMessage = mutation({
   args: {
@@ -297,6 +356,28 @@ export const unpinMessage = mutation({
     
     await ctx.db.patch(args.messageId, { isPinned: false });
     return true;
+  },
+});
+
+// Purge expired / disappearing messages (can be run by a scheduler)
+export const purgeExpiredMessages = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const expired = await ctx.db
+      .query("messages")
+      .filter((q) => q.neq(q.field("expiresAt"), null))
+      .collect();
+
+    const toDelete = expired.filter((m: any) => m.expiresAt && m.expiresAt <= now);
+    for (const m of toDelete) {
+      try {
+        await ctx.db.delete(m._id);
+      } catch (e) {
+        console.error("Failed to delete expired message", m._id, e);
+      }
+    }
+    return toDelete.length;
   },
 });
 
@@ -337,6 +418,8 @@ export const forwardMessage = mutation({
       text: msg.text ? `[Forwarded] ${msg.text}` : "[Forwarded message]",
       mediaType: msg.mediaType,
       mediaUrl: msg.mediaUrl,
+      encryptedText: msg.encryptedText,
+      encryptionIv: msg.encryptionIv,
       status: "sent",
       deliveredTo: [],
       readBy: [],
@@ -357,6 +440,8 @@ export const replyToMessage = mutation({
     mediaType: v.optional(v.string()),
     mediaUrl: v.optional(v.string()),
     replyTo: v.id("messages"),
+    encryptedText: v.optional(v.string()),
+    encryptionIv: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const conv = await ctx.db.get(args.conversationId);
@@ -376,6 +461,8 @@ export const replyToMessage = mutation({
       mediaType: args.mediaType,
       mediaUrl: args.mediaUrl,
       replyTo: args.replyTo,
+      encryptedText: args.encryptedText,
+      encryptionIv: args.encryptionIv,
       status: "sent",
       deliveredTo: [],
       readBy: [],

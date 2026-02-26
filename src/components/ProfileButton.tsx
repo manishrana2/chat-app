@@ -34,9 +34,14 @@ export default function ProfileButton() {
           title={`Logged in as ${user.name || user.username}`}
         >
           {/* Avatar */}
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-            {firstLetter}
-          </div>
+          {user.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.image} alt="avatar" className="w-8 h-8 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+              {firstLetter}
+            </div>
+          )}
           
           {/* User Info */}
           <div className="hidden sm:block text-left">
@@ -111,7 +116,7 @@ export default function ProfileButton() {
 
       {/* Account Info Modal */}
       {showAccountModal && (
-        <AccountInfoModal onClose={() => setShowAccountModal(false)} />
+        <AccountInfoModal onCloseAction={() => setShowAccountModal(false)} />
       )}
     </>
   );

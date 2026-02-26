@@ -25,7 +25,7 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
         <div className="text-center text-white">
           <div className="mb-4 animate-spin">⏳</div>
           <p className="text-xl font-semibold">Loading...</p>
@@ -36,7 +36,7 @@ export default function Home() {
 
   if (!isAuthenticated || !user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600">
         <div className="text-center text-white">
           <p className="mb-4 text-xl">You are not signed in.</p>
           <div className="flex items-center justify-center gap-3">
@@ -62,7 +62,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex min-h-screen">
       {/* sidebar container */}
       <div className={`${hideSidebarOnMobile ? 'hidden sm:flex' : 'flex'} flex-col` }>
         <Sidebar 
@@ -76,11 +76,11 @@ export default function Home() {
       </div>
 
       {/* main content area (chat / stories placeholder) */}
-      <div className={`flex-1 flex items-center justify-center bg-gray-50 ${hideSidebarOnMobile ? '' : 'hidden sm:flex'}`}>
+      <div className={`flex-1 flex ${hideSidebarOnMobile ? 'items-start' : 'items-center'} justify-center bg-gray-50 ${hideSidebarOnMobile ? '' : 'hidden sm:flex'}`}>
         {currentView === "stories" ? (
           <StoriesViewer />
         ) : selectedConversation ? (
-          <ChatWindow conversationId={selectedConversation} onBack={handleBack} />
+          <ChatWindow conversationId={selectedConversation} onBackAction={handleBack} />
         ) : (
           <div className="text-gray-400 text-center">
             <div className="text-5xl mb-4">💬</div>

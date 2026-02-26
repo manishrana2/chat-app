@@ -5,15 +5,16 @@ import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/hooks/useAuth";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useEncryption } from "@/hooks/useEncryption";
 import { useState, useRef, useEffect } from "react";
 import AppLogo from "./AppLogo";
 
 export default function ChatWindow({
   conversationId,
-  onBack,
+  onBackAction,
 }: {
   conversationId: Id<"conversations">;
-  onBack?: () => void;
+  onBackAction?: () => void;
 }) {
   // Ensure generated Convex API is available before using hooks.
   if (!api || !api.messages || !api.typing || !api.users || !api.calls || !api.conversations || !api.requests) {
@@ -26,10 +27,12 @@ export default function ChatWindow({
 
   const { user } = useAuth();
   const { sendNotification, requestPermission, canNotify } = useNotifications();
+  const { encryptMessage: encryptMsg, decryptMessage: decryptMsg, isLoading: encryptionLoading } = useEncryption();
   const messages = useQuery((api.messages as any).getMessages, user ? { conversationId, requesterId: user.userId } : "skip");
   const typingEntries = useQuery((api.typing as any).getTypingForConversation, { conversationId });
   const setTypingMut = useMutation((api.typing as any).setTyping);
   const allUsers = useQuery((api.users as any).getUsers);
+  const reactionsByMessage = useQuery((api.messages as any).getReactionsForConversation, { conversationId });
 
   const sendMessage = useMutation((api.messages as any).sendMessage);
   const markDeliveredMut = useMutation((api.messages as any).markMessageDelivered);
@@ -48,6 +51,7 @@ export default function ChatWindow({
   const [text, setText] = useState("");
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const [fileObj, setFileObj] = useState<File | null>(null);
+  const [decryptedTexts, setDecryptedTexts] = useState<Map<string, string>>(new Map());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -59,6 +63,8 @@ export default function ChatWindow({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null);
+  const [PickerComp, setPickerComp] = useState<any | null>(null);
+  
   const EMOJIS = [
     "😀",
     "😂",
@@ -76,8 +82,6 @@ export default function ChatWindow({
     "😉",
     "🤔",
   ];
-  const [PickerComp, setPickerComp] = useState<any | null>(null);
-
   // Try to dynamically import a full emoji picker library when opened.
   // If the package isn't installed, we'll keep the small built-in grid as a fallback.
   useEffect(() => {
@@ -96,7 +100,34 @@ export default function ChatWindow({
 
   const [prevMessageCount, setPrevMessageCount] = useState(0);
 
-  // Messages are plaintext - no decryption needed
+  // Decrypt incoming encrypted messages
+  useEffect(() => {
+    if (!messages || messages.length === 0 || !decryptMsg) return;
+    
+    const decryptMessages = async () => {
+      const newDecrypted = new Map(decryptedTexts);
+      for (const msg of messages) {
+        if (msg.encryptedText && msg.encryptionIv && !newDecrypted.has(msg._id)) {
+          try {
+            const plaintext = await decryptMsg(
+              msg.encryptionIv,
+              msg.encryptedText,
+              conversationId.toString()
+            );
+            newDecrypted.set(msg._id, plaintext);
+          } catch (error) {
+            console.error(`Failed to decrypt message ${msg._id}:`, error);
+            newDecrypted.set(msg._id, "[Failed to decrypt]");
+          }
+        }
+      }
+      setDecryptedTexts(newDecrypted);
+    };
+    
+    decryptMessages();
+  }, [messages, conversationId, decryptMsg, decryptedTexts]);
+
+  // Messages with E2E encryption support
   useEffect(() => {
     // Auto-mark messages as delivered when loaded
     if (messages && messages.length > 0) {
@@ -185,8 +216,20 @@ export default function ChatWindow({
         mediaType = fileObj.type.startsWith("image") ? "image" : fileObj.type.startsWith("video") ? "video" : "file";
       }
 
-      // Send message as plaintext
-      const messageText = text || undefined;
+      // Encrypt message text if present
+      let encryptedText: string | undefined = undefined;
+      let encryptionIv: string | undefined = undefined;
+      if (text.trim()) {
+        try {
+          const encrypted = await encryptMsg(text, conversationId.toString());
+          encryptedText = encrypted.ciphertext;
+          encryptionIv = encrypted.iv;
+        } catch (error) {
+          console.error("Encryption failed:", error);
+          alert("Failed to encrypt message");
+          return;
+        }
+      }
 
       if (replyToMsg) {
         // sending a reply
@@ -197,10 +240,12 @@ export default function ChatWindow({
         await (replyToMessageMut as any)({
           conversationId,
           senderId: user?.userId || "",
-          text: messageText,
+          text,
           mediaType,
           mediaUrl,
           replyTo: replyToMsg._id,
+          encryptedText,
+          encryptionIv,
         });
         setReplyToMsg(null);
       } else {
@@ -212,9 +257,11 @@ export default function ChatWindow({
         await (sendMessage as any)({
           conversationId,
           senderId: user?.userId || "",
-          text: messageText,
+          text,
           mediaType,
           mediaUrl,
+          encryptedText,
+          encryptionIv,
         });
       }
       
@@ -537,10 +584,10 @@ export default function ChatWindow({
   };
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full min-h-screen relative flex flex-col">
       {/* Incoming call banner */}
       {incomingCall && (
-        <div className="absolute left-4 top-20 z-30 bg-white/90 border rounded p-3 w-80 shadow-lg">
+        <div className="absolute top-20 z-30 bg-white/90 border rounded p-3 sm:w-80 w-auto inset-x-0 mx-4 sm:mx-0 shadow-lg">
           <div className="font-medium">Incoming {incomingCall.callType} call</div>
           <div className="text-sm text-muted">From: {(() => {
               const u = (allUsers || []).find((x: any) => x.clerkId === incomingCall.callerId);
@@ -552,19 +599,23 @@ export default function ChatWindow({
           </div>
         </div>
       )}
-      <div className="p-3 sm:p-4 border-b font-semibold chat-header flex items-center justify-between text-sm sm:text-base">
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="sm:hidden mr-2 p-1 rounded hover:bg-white/20"
-            title="Back to chats"
-          >
-            ←
-          </button>
-        )}
-        <div className="flex flex-col min-w-0 flex-1">
+      <header className="relative flex items-center px-4 h-16 sm:h-18 md:h-20 border-b">
+        {/* left: back + logo */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onBackAction && (
+            <button
+              onClick={onBackAction}
+              className="sm:hidden p-1 rounded hover:bg-white/20"
+              title="Back to chats"
+            >
+              ←
+            </button>
+          )}
           <AppLogo />
-          <div className="text-xs text-muted truncate mt-1">
+        </div>
+        {/* center: status/typing absolute so it stays perfectly centered */}
+        <div className="absolute inset-x-0 flex justify-center pointer-events-none">
+          <div className="truncate text-sm text-muted max-w-[60%]">
             {(typingEntries || [])
               .filter((t: any) => t.userId !== user?.userId && t.isTyping)
               .map((t: any) => {
@@ -572,12 +623,13 @@ export default function ChatWindow({
                 return u ? u.name : t.userId;
               })
               .slice(0, 2)
-              .map((n: any, i: number) => (i === 0 ? `${n} is typing` : `${n} is typing`))
+              .map((n: any, i: number) => `${n} is typing`)
               .join(", ")}
           </div>
         </div>
-        {/* Request UI: allow sending/accepting chat requests */}
-        <div className="flex items-center gap-2">
+        {/* right: actions and request UI */}
+        <div className="ml-auto flex items-center gap-1 sm:gap-2 overflow-x-auto z-10">
+          {/* Request UI: allow sending/accepting chat requests */}
           {(() => {
             const otherId = conversation?.members?.find((m: string) => m !== user?.userId) || null;
             const req = requestBetween as any;
@@ -629,8 +681,6 @@ export default function ChatWindow({
             }
             return null;
           })()}
-        </div>
-        <div className="flex items-center gap-2">
           <button
             title="Start voice call"
             onClick={() => startCall("audio")}
@@ -702,7 +752,7 @@ export default function ChatWindow({
             </svg>
           </button>
         </div>
-      </div>
+      </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {safeMessages.map((m: any) => {
@@ -713,8 +763,8 @@ export default function ChatWindow({
           const isRead = outgoing && otherId && m.readBy && m.readBy.includes(otherId);
           const isDeleted = !!m.deletedAt;
 
-          // Get plaintext message
-          const messageText = m.text;
+          // Get plaintext message (decrypted if encrypted, otherwise fallback to plaintext)
+          const messageText = m.encryptedText ? decryptedTexts.get(m._id) || "🔐 Decrypting..." : m.text;
 
           return (
             <div key={m._id} className={`flex flex-col ${outgoing ? "items-end" : "items-start"}`}>
@@ -723,7 +773,7 @@ export default function ChatWindow({
                 <div className="text-xs text-gray-500 mb-1 px-2">[Replying to message]</div>
               )}
               
-              <div className={`chat-bubble ${outgoing ? "outgoing ml-auto" : "incoming"} px-3 py-2 rounded max-w-xs group relative`}>
+                    <div className={`chat-bubble ${outgoing ? "outgoing ml-auto" : "incoming"} px-3 py-2 rounded max-w-xs group relative`}>
                 {m.isPinned && <div className="text-xs text-yellow-600 font-bold">📌 Pinned</div>}
                 {m.isForwarded && <div className="text-xs text-blue-600">↪️ Forwarded</div>}
                 
@@ -771,6 +821,33 @@ export default function ChatWindow({
                     )}
                   </div>
                 </div>
+                {/* Reactions display */}
+                {reactionsByMessage && reactionsByMessage[m._id] && (
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    {reactionsByMessage[m._id].map((r: any) => (
+                      <button
+                        key={r.emoji}
+                        onClick={async () => {
+                          try {
+                            const userReacted = (r.userIds || []).includes(user?.userId);
+                            if (userReacted) {
+                              await removeReactionMut({ messageId: m._id, userId: user?.userId || "", emoji: r.emoji });
+                            } else {
+                              await addReactionMut({ messageId: m._id, userId: user?.userId || "", emoji: r.emoji });
+                            }
+                          } catch (e) {
+                            console.error("Reaction toggle failed", e);
+                          }
+                        }}
+                        className={`px-2 py-1 text-sm rounded-full border ${((r.userIds||[]).includes(user?.userId) ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-200')}`}
+                        type="button"
+                      >
+                        <span className="mr-1">{r.emoji}</span>
+                        <span className="text-xs">{r.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               
               {/* Action buttons (Edit/Delete/Pin/Forward/Reply visible on hover) */}
@@ -784,10 +861,19 @@ export default function ChatWindow({
                             const newText = prompt("Edit message:", messageText || "");
                             if (newText !== null && newText !== messageText) {
                               try {
+                                let encryptedText: string | undefined = undefined;
+                                let encryptionIv: string | undefined = undefined;
+                                if (newText.trim()) {
+                                  const encrypted = await encryptMsg(newText, conversationId.toString());
+                                  encryptedText = encrypted.ciphertext;
+                                  encryptionIv = encrypted.iv;
+                                }
                                 await editMessageMut({
                                   messageId: m._id,
                                   senderId: user?.userId || "",
                                   text: newText || undefined,
+                                  encryptedText,
+                                  encryptionIv,
                                 });
                               } catch (e) {
                                 console.error("Failed to edit message:", e);
@@ -1044,7 +1130,7 @@ export default function ChatWindow({
 
       {/* Call panel: show when in call or when an offer/answer is generated */}
       {(inCall || localSDP) && (
-        <div className="absolute right-4 bottom-24 z-20 bg-white/80 border rounded p-3 w-96 shadow-lg">
+        <div className="absolute bottom-24 z-20 bg-white/80 border rounded p-3 sm:w-96 w-auto inset-x-0 mx-4 sm:mx-0 shadow-lg">
           <div className="flex items-center justify-between mb-2">
             <div className="font-medium">{callType === "video" ? "Video Call" : "Voice Call"}</div>
             <div className="flex items-center gap-2">

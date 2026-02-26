@@ -6,16 +6,18 @@ import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
 type AccountInfoModalProps = {
-  onClose: () => void;
+  onCloseAction: () => void;
 };
 
-export default function AccountInfoModal({ onClose }: AccountInfoModalProps) {
+export default function AccountInfoModal({ onCloseAction }: AccountInfoModalProps) {
   const { user, updateUser } = useAuth();
   const updateProfileMut = useMutation((api.users as any).updateProfile);
   
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(user?.name || "");
   const [bio, setBio] = useState(user?.bio || "");
+  const [imagePreview, setImagePreview] = useState<string | null>(user?.image || null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -33,14 +35,27 @@ export default function AccountInfoModal({ onClose }: AccountInfoModalProps) {
     setSuccess("");
 
     try {
-      await updateProfileMut({
-        userId: user.userId,
-        name: name.trim(),
-        bio: bio.trim(),
-      });
+      const payload: any = { userId: user.userId };
+      if (name.trim()) payload.name = name.trim();
+      if (bio !== undefined) payload.bio = bio.trim();
+      // If an image file was selected, convert to data URL and send
+      if (imageFile) {
+        const dataUrl = await new Promise<string>((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(String(reader.result));
+          reader.onerror = rej;
+          reader.readAsDataURL(imageFile);
+        });
+        payload.image = dataUrl;
+      } else if (imagePreview) {
+        // if preview changed to an existing URL string, allow image update
+        payload.image = imagePreview;
+      }
+
+      await updateProfileMut(payload);
       setSuccess("Profile updated successfully!");
       // update auth context so UI reflects new name immediately
-      updateUser({ name: name.trim(), bio: bio.trim() });
+      updateUser({ name: name.trim(), bio: bio.trim(), image: payload.image || user.image });
       setIsEditing(false);
       setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
@@ -59,7 +74,7 @@ export default function AccountInfoModal({ onClose }: AccountInfoModalProps) {
         <div className="bg-gradient-to-r from-blue-500 to-purple-600 text-white p-4 rounded-t-lg flex justify-between items-center">
           <h2 className="text-lg font-bold">Account Info</h2>
           <button
-            onClick={onClose}
+            onClick={onCloseAction}
             className="text-white hover:bg-white/20 rounded-full p-1 transition"
           >
             ✕
@@ -70,8 +85,33 @@ export default function AccountInfoModal({ onClose }: AccountInfoModalProps) {
         <div className="p-6">
           {/* Avatar */}
           <div className="flex justify-center mb-4">
-            <div className="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-4xl font-bold">
-              {firstLetter}
+            <div className="relative">
+              {imagePreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={imagePreview} alt="avatar" className="w-20 h-20 rounded-full object-cover" />
+              ) : (
+                <div className="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-4xl font-bold">
+                  {firstLetter}
+                </div>
+              )}
+              {isEditing && (
+                <label className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 border cursor-pointer">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] || null;
+                      if (f) {
+                        setImageFile(f);
+                        const url = URL.createObjectURL(f);
+                        setImagePreview(url);
+                      }
+                    }}
+                  />
+                  <span className="text-sm">📷</span>
+                </label>
+              )}
             </div>
           </div>
 

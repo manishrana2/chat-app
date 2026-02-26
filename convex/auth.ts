@@ -147,6 +147,38 @@ export const checkUsernameAvailable = query({
   },
 });
 
+// Check if email is available
+export const checkEmailAvailable = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    if (!args.email) {
+      return {
+        available: true,
+        reason: "Email is optional",
+      };
+    }
+
+    // Simple email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(args.email)) {
+      return {
+        available: false,
+        reason: "Invalid email format",
+      };
+    }
+
+    const existing = await ctx.db
+      .query("users")
+      .filter((q) => q.eq(q.field("email"), args.email.toLowerCase()))
+      .first();
+
+    return {
+      available: !existing,
+      reason: existing ? "Email already registered" : "",
+    };
+  },
+});
+
 // Get user by ID
 export const getUserById = query({
   args: { userId: v.string() },
@@ -167,6 +199,22 @@ export const getUserById = query({
   },
 });
 
+  // Set user online status (login/logout hooks)
+  export const setUserOnline = mutation({
+    args: { userId: v.id("users"), isOnline: v.boolean() },
+    handler: async (ctx, args) => {
+      try {
+        const updates: any = { isOnline: args.isOnline };
+        if (!args.isOnline) updates.lastSeen = Date.now();
+        await ctx.db.patch(args.userId, updates);
+        return true;
+      } catch (e) {
+        console.error("Failed to set user online status", e);
+        return false;
+      }
+    },
+  });
+
 // Logout
 export const logout = mutation({
   args: { userId: v.string() },
@@ -182,7 +230,7 @@ export const logout = mutation({
   },
 });
 
-// Request password reset - generates token
+// Request password reset - generates OTP
 export const requestPasswordReset = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
@@ -200,47 +248,91 @@ export const requestPasswordReset = mutation({
       throw new Error("No account found with this email");
     }
 
-    // Generate reset token (simple: base64 encoded timestamp + random)
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 15);
-    const resetToken = Buffer.from(`${timestamp}_${random}`).toString("base64");
-    const resetTokenExpiry = timestamp + 3600000; // 1 hour expiry
+    // Generate 6-digit OTP
+    const resetOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const resetOtpExpiry = Date.now() + 600000; // 10 minutes expiry
 
-    // Save reset token to user
+    // Save OTP to user
     await ctx.db.patch(user._id, {
-      resetToken,
-      resetTokenExpiry,
+      resetOtp,
+      resetOtpExpiry,
     });
 
+    // Attempt to send the OTP via email using SendGrid
+    const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+    if (SENDGRID_API_KEY) {
+      try {
+        const resp = await fetch("https://api.sendgrid.com/v3/mail/send", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${SENDGRID_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            personalizations: [
+              {
+                to: [{ email: args.email }],
+              },
+            ],
+            from: { email: "no-reply@chathub.example.com", name: "ChatHub" },
+            subject: "Your ChatHub password reset code",
+            content: [
+              {
+                type: "text/plain",
+                value: `Your OTP is ${resetOtp}. It expires in 10 minutes.`,
+              },
+            ],
+          }),
+        });
+        if (!resp.ok) {
+          const body = await resp.text();
+          console.error("SendGrid error", resp.status, body);
+          throw new Error("Email service returned an error");
+        }
+      } catch (e) {
+        console.error("Failed to send OTP email:", e);
+        // communicate failure to client
+        throw new Error("Unable to send OTP email, please try again later.");
+      }
+    } else {
+      console.warn("SENDGRID_API_KEY not set; OTP email not sent");
+    }
+
     return {
-      message: "Password reset token sent",
-      resetToken, // In production, send this via email
+      message: "OTP sent to your email",
+      otp: resetOtp, // Still returned for development if needed
       email: user.email,
     };
   },
 });
 
-// Verify reset token
-export const verifyResetToken = query({
-  args: { token: v.string() },
+// Verify OTP for password reset
+export const verifyResetOtp = mutation({
+  args: { email: v.string(), otp: v.string() },
   handler: async (ctx, args) => {
-    if (!args.token) {
-      throw new Error("Token is required");
+    if (!args.email || !args.otp) {
+      throw new Error("Email and OTP are required");
     }
 
+    // Find user by email
     const user = await ctx.db
       .query("users")
-      .filter((q) => q.eq(q.field("resetToken"), args.token))
+      .filter((q) => q.eq(q.field("email"), args.email.toLowerCase()))
       .first();
 
     if (!user) {
-      throw new Error("Invalid or expired token");
+      throw new Error("User not found");
+    }
+
+    // Check if OTP matches
+    if (user.resetOtp !== args.otp) {
+      throw new Error("Invalid OTP");
     }
 
     // Check expiry
     const now = Date.now();
-    if (user.resetTokenExpiry && user.resetTokenExpiry < now) {
-      throw new Error("Reset token has expired");
+    if (user.resetOtpExpiry && user.resetOtpExpiry < now) {
+      throw new Error("OTP has expired. Request a new one.");
     }
 
     return {
@@ -251,16 +343,17 @@ export const verifyResetToken = query({
   },
 });
 
-// Reset password with token
+// Reset password with OTP
 export const resetPassword = mutation({
   args: {
-    token: v.string(),
+    email: v.string(),
+    otp: v.string(),
     newPassword: v.string(),
     confirmPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    if (!args.token) {
-      throw new Error("Token is required");
+    if (!args.email || !args.otp) {
+      throw new Error("Email and OTP are required");
     }
 
     if (!args.newPassword || args.newPassword.length < 6) {
@@ -271,30 +364,35 @@ export const resetPassword = mutation({
       throw new Error("Passwords do not match");
     }
 
-    // Find user by reset token
+    // Find user by email
     const user = await ctx.db
       .query("users")
-      .filter((q) => q.eq(q.field("resetToken"), args.token))
+      .filter((q) => q.eq(q.field("email"), args.email.toLowerCase()))
       .first();
 
     if (!user) {
-      throw new Error("Invalid or expired token");
+      throw new Error("User not found");
+    }
+
+    // Check if OTP matches
+    if (user.resetOtp !== args.otp) {
+      throw new Error("Invalid OTP");
     }
 
     // Check expiry
     const now = Date.now();
-    if (user.resetTokenExpiry && user.resetTokenExpiry < now) {
-      throw new Error("Reset token has expired");
+    if (user.resetOtpExpiry && user.resetOtpExpiry < now) {
+      throw new Error("OTP has expired");
     }
 
     // Hash new password
     const hashedPassword = await hashPassword(args.newPassword);
 
-    // Update password and clear reset token
+    // Update password and clear OTP
     await ctx.db.patch(user._id, {
       password: hashedPassword,
-      resetToken: undefined,
-      resetTokenExpiry: undefined,
+      resetOtp: undefined,
+      resetOtpExpiry: undefined,
     });
 
     return {
