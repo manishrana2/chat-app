@@ -2,6 +2,7 @@
 
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { AuthProvider } from "@/hooks/useAuth";
+import { ErrorBoundary, ErrorLogger } from "@/components/ErrorBoundary";
 import { ReactNode } from "react";
 
 const convex = new ConvexReactClient(
@@ -10,10 +11,13 @@ const convex = new ConvexReactClient(
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <ConvexProvider client={convex}>
-      <AuthProvider>
-        {children}
-      </AuthProvider>
-    </ConvexProvider>
+    <ErrorBoundary>
+      <ConvexProvider client={convex}>
+        <AuthProvider>
+          <ErrorLogger />
+          {children}
+        </AuthProvider>
+      </ConvexProvider>
+    </ErrorBoundary>
   );
 }

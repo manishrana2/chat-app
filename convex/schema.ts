@@ -6,11 +6,13 @@ export default defineSchema({
   clerkId: v.optional(v.string()),
   name: v.string(),
   image: v.string(),
+  bio: v.optional(v.string()),
   username: v.optional(v.string()), // unique username for login
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
   password: v.optional(v.string()), // hashed password for custom auth
   isOnline: v.boolean(),
+  friends: v.optional(v.array(v.string())), // list of friend user IDs
   blockedUsers: v.optional(v.array(v.string())), // list of user IDs that this user has blocked/unfriended
   resetToken: v.optional(v.string()), // for password reset
   resetTokenExpiry: v.optional(v.number()), // timestamp when token expires

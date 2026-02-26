@@ -182,8 +182,16 @@ export const unfriendUser = mutation({
     const blockedUsers: string[] = (user as any).blockedUsers || [];
     if (!blockedUsers.includes(args.targetUserId)) {
       blockedUsers.push(args.targetUserId);
-      await ctx.db.patch(args.userId as any, { blockedUsers });
     }
+
+    // Also remove from friends list
+    const friends: string[] = (user as any).friends || [];
+    const filteredFriends = friends.filter(id => id !== args.targetUserId);
+
+    await ctx.db.patch(args.userId as any, { 
+      blockedUsers,
+      friends: filteredFriends
+    });
 
     return true;
   },
@@ -200,5 +208,113 @@ export const getBlockedUsers = query({
     }
 
     return (user as any).blockedUsers || [];
+  },
+});
+
+// Update user profile
+export const updateProfile = mutation({
+  args: {
+    userId: v.string(),
+    name: v.optional(v.string()),
+    image: v.optional(v.string()),
+    bio: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId as any);
+    
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const updates: any = {};
+    
+    if (args.name !== undefined && args.name.trim()) {
+      if (args.name.length < 2) {
+        throw new Error("Name must be at least 2 characters");
+      }
+      updates.name = args.name;
+    }
+
+    if (args.image !== undefined) {
+      updates.image = args.image;
+    }
+
+    if (args.bio !== undefined) {
+      updates.bio = args.bio;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new Error("No valid fields to update");
+    }
+
+    await ctx.db.patch(args.userId as any, updates);
+    return true;
+  },
+});
+
+// Mark user as friend
+export const markAsFriend = mutation({
+  args: { userId: v.string(), friendId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId as any);
+    
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    const friends: string[] = (user as any).friends || [];
+    if (!friends.includes(args.friendId)) {
+      friends.push(args.friendId);
+    }
+
+    // Remove from blockedUsers if present
+    const blockedUsers: string[] = (user as any).blockedUsers || [];
+    const filteredBlocked = blockedUsers.filter(id => id !== args.friendId);
+
+    await ctx.db.patch(args.userId as any, { 
+      friends,
+      blockedUsers: filteredBlocked
+    });
+
+    return true;
+  },
+});
+
+// Get friends list
+export const getFriends = query({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId as any);
+    
+    if (!user || !("friends" in user)) {
+      return [];
+    }
+
+    const friendIds = (user as any).friends || [];
+    const friends = [];
+    
+    for (const friendId of friendIds) {
+      const friend = await ctx.db.get(friendId as any);
+      if (friend) {
+        friends.push(friend);
+      }
+    }
+
+    return friends;
+  },
+});
+
+// Check if users are friends
+export const areFriends = query({
+  args: { userId: v.string(), otherId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId as any);
+    
+    if (!user || !("friends" in user)) {
+      return false;
+    }
+
+    const friends = (user as any).friends || [];
+    return friends.includes(args.otherId);
   },
 });

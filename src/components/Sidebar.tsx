@@ -4,9 +4,12 @@ import { useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
 import { Id } from "../../convex/_generated/dataModel";
 import StatusBar from "./StatusBar";
 import UserSearch from "./UserSearch";
+import ProfileButton from "./ProfileButton";
+import AppLogo from "./AppLogo";
 import { useState } from "react";
 
 type SidebarProps = {
@@ -16,7 +19,18 @@ type SidebarProps = {
 };
 
 export default function Sidebar({ onSelectAction, onStoriesClickAction, currentView = "conversations" }: SidebarProps) {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const { requestPermission } = useNotifications();
+  const [permissionAsked, setPermissionAsked] = useState(false);
+  
+  // Request notification permission on first load
+  useEffect(() => {
+    if (user && !permissionAsked) {
+      requestPermission().catch(() => {});
+      setPermissionAsked(true);
+    }
+  }, [user, permissionAsked, requestPermission]);
+  
   const users = (api.users && (api.users as any).getUsers) ? useQuery((api.users as any).getUsers) : null as any;
   const safeUsers = users || [];
 
@@ -37,6 +51,7 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
 
   const createConversation = useMutation(convApi.createConversation);
   const unfriendUserMut = useMutation((api.users as any).unfriendUser);
+  const markAsFriendMut = useMutation((api.users as any).markAsFriend);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
 
@@ -44,11 +59,21 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
     if (!user) return;
     if (!createConversation) return alert('Conversations API not available. Run `npx convex dev`.');
     
-    // Always use _id (Convex document ID) for consistency, not clerkId
     const otherUserId = otherUser._id;
     if (!otherUserId) {
       alert('Cannot create conversation - user ID not found');
       return;
+    }
+
+    // Ensure friendship before creating conversation
+    const userFriends = (user as any)?.friends || [];
+    if (!userFriends.includes(otherUserId)) {
+      try {
+        await markAsFriendMut({ userId: user.userId, friendId: otherUserId });
+        updateUser({ friends: [...((user as any)?.friends || []), otherUserId] });
+      } catch (e) {
+        console.error('Failed to add friend before conversation:', e);
+      }
     }
     
     const conversationId = await createConversation({
@@ -59,14 +84,20 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
   };
 
   return (
-    <div className="w-64 h-screen border-r p-4 overflow-y-auto sidebar">
+    <div className="w-full sm:w-64 h-auto sm:h-screen border-b sm:border-r border-gray-300 bg-white sidebar flex flex-col sm:p-4 p-3 overflow-y-auto">
+      {/* Header with Logo and Profile Button */}
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <AppLogo />
+        <ProfileButton />
+      </div>
+
       <StatusBar />
       
       {/* Navigation Tabs */}
       <div className="flex gap-2 mb-4 bg-gray-100 p-1 rounded-lg">
         <button
           onClick={() => {}}
-          className={`flex-1 py-2 px-3 rounded text-sm font-semibold transition-colors ${
+          className={`flex-1 py-2 px-3 rounded text-xs sm:text-sm font-semibold transition-colors ${
             currentView === "conversations"
               ? "bg-white text-blue-600 shadow"
               : "text-gray-600 hover:text-gray-800"
@@ -76,7 +107,7 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
         </button>
         <button
           onClick={() => onStoriesClickAction?.()}
-          className={`flex-1 py-2 px-3 rounded text-sm font-semibold transition-colors ${
+          className={`flex-1 py-2 px-3 rounded text-xs sm:text-sm font-semibold transition-colors ${
             currentView === "stories"
               ? "bg-white text-blue-600 shadow"
               : "text-gray-600 hover:text-gray-800"
@@ -96,7 +127,7 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
           placeholder="🔍 Search messages..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-3 py-2 border rounded-lg text-sm"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         {searchQuery && searchResults.length > 0 && (
           <div className="mt-2 border rounded p-2 bg-gray-50 max-h-32 overflow-y-auto">
@@ -128,7 +159,16 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
           }
           const unique = Object.values(byPartner).sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
-          return unique.map((c: any) => {
+          // Filter to show only **friends** (not unfriended/blocked)
+          const friendConversations = unique.filter((c: any) => {
+            const otherId = (c.members || []).find((m: string) => m !== user?.userId) || c.members?.[0];
+            const userFriends = (user as any)?.friends || [];
+            const blockedUsers = (user as any)?.blockedUsers || [];
+            // Show conversation only if partner is a friend and not blocked
+            return userFriends.includes(otherId) && !blockedUsers.includes(otherId);
+          });
+
+          return friendConversations.map((c: any) => {
             const otherId = (c.members || []).find((m: string) => m !== user?.userId) || c.members?.[0];
             const partner = safeUsers.find((u: any) => u._id === otherId);
             const avatar = partner?.image || undefined;
@@ -171,6 +211,14 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
         safeUsers.map((u: any) => {
           if (u.clerkId === user?.userId) return null;
 
+          // Check if this user is a friend
+          const userFriends = (user as any)?.friends || [];
+          const isFriend = userFriends.includes(u._id);
+          
+          // Check if user is blocked
+          const blockedUsers = (user as any)?.blockedUsers || [];
+          const isBlocked = blockedUsers.includes(u._id);
+
           return (
             <div
               key={u._id}
@@ -185,31 +233,76 @@ export default function Sidebar({ onSelectAction, onStoriesClickAction, currentV
                   className="w-8 h-8 rounded-full object-cover"
                   alt={u.name}
                 />
-                <p className="text-sm truncate">{u.name}</p>
+                <div className="flex flex-col flex-1 min-w-0">
+                  <p className="text-sm truncate">{u.name}</p>
+                  <p className="text-xs text-gray-500 truncate">
+                    {isFriend ? "✓ Friend" : "Not Friend"}
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  if (confirm(`Unfriend ${u.name}?`)) {
-                    try {
-                      await unfriendUserMut({ userId: user?.userId || "", targetUserId: u._id });
-                      alert("User unfriended");
-                    } catch (err) {
-                      console.error(err);
-                      alert("Failed to unfriend user");
+              
+              {isFriend ? (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Remove ${u.name}?`)) {
+                      try {
+                        await unfriendUserMut({ userId: user?.userId || "", targetUserId: u._id });
+                        // remove from auth context friends array
+                        updateUser({ friends: ((user as any)?.friends || []).filter((id: string) => id !== u._id) });
+                        alert("User removed");
+                      } catch (err) {
+                        console.error(err);
+                        alert("Failed to remove user");
+                      }
                     }
-                  }
-                }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center rounded hover:bg-red-100"
-                title="Unfriend"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="red" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="8.5" cy="7" r="4" />
-                  <line x1="18" y1="8" x2="23" y2="13" />
-                  <line x1="23" y1="8" x2="18" y2="13" />
-                </svg>
-              </button>
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 bg-red-100 text-red-600 text-xs rounded hover:bg-red-200 font-medium"
+                  title="Remove Friend"
+                >
+                  ✕
+                </button>
+              ) : isBlocked ? (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Add ${u.name} as friend?`)) {
+                      try {
+                        await markAsFriendMut({ userId: user?.userId || "", friendId: u._id });
+                        updateUser({ friends: [...((user as any)?.friends || []), u._id] });
+                        alert("Friend added");
+                      } catch (err) {
+                        console.error(err);
+                        alert("Failed to add friend");
+                      }
+                    }
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 bg-blue-100 text-blue-600 text-xs rounded hover:bg-blue-200 font-medium"
+                  title="Add as Friend"
+                >
+                  + Add
+                </button>
+              ) : (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (confirm(`Add ${u.name} as friend?`)) {
+                      try {
+                        await markAsFriendMut({ userId: user?.userId || "", friendId: u._id });
+                        updateUser({ friends: [...((user as any)?.friends || []), u._id] });
+                        alert("Friend added");
+                      } catch (err) {
+                        console.error(err);
+                        alert("Failed to add friend");
+                      }
+                    }
+                  }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 bg-green-100 text-green-600 text-xs rounded hover:bg-green-200 font-medium"
+                  title="Add as Friend"
+                >
+                  + Add
+                </button>
+              )}
             </div>
           );
         })

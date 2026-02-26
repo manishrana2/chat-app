@@ -8,6 +8,9 @@
   --whatsapp-accent: #075E54;
   --sidebar-bg: #ffffff;
   --muted: #9aa0a6;
+  --text-min: 14px;
+  --text-sm: 13px;
+  --text-base: 16px;
 }
 
 @theme inline {
@@ -24,30 +27,131 @@
   }
 }
 
+/* Mobile-first text sizes - prevent blurring */
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* prevent accidental horizontal scroll on small screens */
+  overflow-x: hidden;
+}
+
+/* Mobile text sizing - clear and readable */
+@media (max-width: 640px) {
+  body {
+    font-size: 16px;
+  }
+  
+  p, span, div, button, a {
+    font-size: inherit;
+  }
+  
+  .text-xs {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  
+  .text-sm {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  
+  .text-base {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  
+  .text-lg {
+    font-size: 18px;
+    line-height: 1.6;
+  }
+  
+  .text-xl {
+    font-size: 20px;
+    line-height: 1.6;
+  }
+  
+  .text-2xl {
+    font-size: 24px;
+    line-height: 1.6;
+  }
+  
+  /* Ensure minimum touch target size on mobile */
+  button, a, input, textarea, select {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+}
+
+/* Desktop text sizing */
+@media (min-width: 641px) {
+  .text-xs {
+    font-size: 12px;
+  }
+  
+  .text-sm {
+    font-size: 13px;
+  }
+  
+  .text-base {
+    font-size: 14px;
+  }
 }
 
 /* WhatsApp-like utilities */
 .chat-header {
   background: linear-gradient(90deg, var(--whatsapp-accent), #128C7E);
   color: white;
+  @apply p-3 sm:p-4;
 }
 
 .sidebar {
   background: var(--sidebar-bg);
+  @apply bg-white;
 }
 
 .chat-bubble.incoming {
   background: white;
   color: var(--foreground);
+  @apply text-sm sm:text-base;
 }
 
 .chat-bubble.outgoing {
   background: var(--whatsapp-chat-bg);
   color: var(--foreground);
+  @apply text-sm sm:text-base;
 }
 
-.muted { color: var(--muted); }
+.muted { 
+  color: var(--muted); 
+}
+
+/* Responsive container */
+.container {
+  @apply px-3 sm:px-4 md:px-6;
+}
+
+/* Better input visibility on mobile */
+input, textarea, select {
+  @apply text-base;
+}
+
+/* Prevent text zoom on focus (iOS fix) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+textarea,
+select {
+  font-size: 16px !important;
+}

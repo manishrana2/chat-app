@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import AppLogo from "@/components/AppLogo";
 
 export default function SignIn() {
   const router = useRouter();
@@ -35,6 +36,7 @@ export default function SignIn() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600 p-4">
       <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+        <AppLogo className="mx-auto mb-4 w-20 h-20" />
         <h1 className="text-3xl font-bold text-center text-gray-800 mb-8">
           Welcome Back! 👋
         </h1>
@@ -80,8 +82,9 @@ export default function SignIn() {
 
           {/* Error Message */}
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
+            <div className="bg-yellow-50 border-2 border-yellow-400 text-yellow-800 px-4 py-3 rounded-lg text-sm font-semibold flex items-start gap-2">
+              <span className="text-lg">⚠️</span>
+              <span>{error}</span>
             </div>
           )}
 

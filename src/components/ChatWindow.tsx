@@ -4,13 +4,16 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useNotifications";
 import { useState, useRef, useEffect } from "react";
-import ProfileButton from "./ProfileButton";
+import AppLogo from "./AppLogo";
 
 export default function ChatWindow({
   conversationId,
+  onBack,
 }: {
   conversationId: Id<"conversations">;
+  onBack?: () => void;
 }) {
   // Ensure generated Convex API is available before using hooks.
   if (!api || !api.messages || !api.typing || !api.users || !api.calls || !api.conversations || !api.requests) {
@@ -22,6 +25,7 @@ export default function ChatWindow({
   }
 
   const { user } = useAuth();
+  const { sendNotification, requestPermission, canNotify } = useNotifications();
   const messages = useQuery((api.messages as any).getMessages, user ? { conversationId, requesterId: user.userId } : "skip");
   const typingEntries = useQuery((api.typing as any).getTypingForConversation, { conversationId });
   const setTypingMut = useMutation((api.typing as any).setTyping);
@@ -90,6 +94,8 @@ export default function ChatWindow({
     }
   }, [showEmojiPicker, PickerComp]);
 
+  const [prevMessageCount, setPrevMessageCount] = useState(0);
+
   // Messages are plaintext - no decryption needed
   useEffect(() => {
     // Auto-mark messages as delivered when loaded
@@ -101,6 +107,36 @@ export default function ChatWindow({
       });
     }
   }, [messages, user?.userId]);
+
+  // Send notification for new incoming messages
+  useEffect(() => {
+    if (!messages || !user || !sendNotification) return;
+    
+    const newMessageCount = messages.length;
+    if (newMessageCount > prevMessageCount) {
+      const newMessages = messages.slice(prevMessageCount);
+      newMessages.forEach((msg: any) => {
+        // Only notify if message is from another user
+        if (msg.senderId !== user.userId) {
+          const senderUser = (allUsers || []).find((u: any) => u.clerkId === msg.senderId);
+          const senderName = senderUser?.name || "User";
+          const messagePreview = msg.text ? msg.text.substring(0, 50) : `[${msg.mediaType || 'message'}]`;
+          
+          try {
+            sendNotification({
+              title: `New message from ${senderName}`,
+              body: messagePreview || "New message",
+              icon: senderUser?.image || "/icon.png",
+              tag: `msg-${conversationId}`,
+            }).catch(() => {});
+          } catch (e) {
+            console.warn("Failed to send notification:", e);
+          }
+        }
+      });
+    }
+    setPrevMessageCount(newMessageCount);
+  }, [messages?.length, user?.userId, allUsers, sendNotification, conversationId]);
 
   const safeMessages = messages || [];
 
@@ -516,10 +552,19 @@ export default function ChatWindow({
           </div>
         </div>
       )}
-      <div className="p-4 border-b font-semibold chat-header flex items-center justify-between">
-        <div className="flex flex-col">
-          <div>Chat</div>
-          <div className="text-xs text-muted">
+      <div className="p-3 sm:p-4 border-b font-semibold chat-header flex items-center justify-between text-sm sm:text-base">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="sm:hidden mr-2 p-1 rounded hover:bg-white/20"
+            title="Back to chats"
+          >
+            ←
+          </button>
+        )}
+        <div className="flex flex-col min-w-0 flex-1">
+          <AppLogo />
+          <div className="text-xs text-muted truncate mt-1">
             {(typingEntries || [])
               .filter((t: any) => t.userId !== user?.userId && t.isTyping)
               .map((t: any) => {
@@ -855,11 +900,11 @@ export default function ChatWindow({
         })}
       </div>
 
-      <div className="border-t p-4 flex flex-col gap-2">
+      <div className="border-t p-3 sm:p-4 flex flex-col gap-2">
         {/* Reply indicator */}
         {replyToMsg && (
-          <div className="flex items-center justify-between bg-blue-50 border-l-4 border-blue-500 p-2 rounded">
-            <div className="flex-1">
+          <div className="flex items-center justify-between bg-blue-50 border-l-4 border-blue-500 p-2 rounded text-sm sm:text-base">
+            <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-blue-900">Replying to:</div>
               <div className="text-sm text-blue-800 truncate">
                 {replyToMsg.text || (replyToMsg.mediaType ? `[${replyToMsg.mediaType}]` : "...")}
@@ -867,7 +912,7 @@ export default function ChatWindow({
             </div>
             <button
               onClick={() => setReplyToMsg(null)}
-              className="text-blue-500 hover:text-blue-700 font-bold"
+              className="text-blue-500 hover:text-blue-700 font-bold ml-2 flex-shrink-0"
             >
               ✕
             </button>
@@ -885,7 +930,7 @@ export default function ChatWindow({
           </div>
         )}
 
-        <div className="flex gap-2 items-center relative">
+        <div className="flex gap-2 items-end relative flex-wrap">
           <input
             ref={fileInputRef}
             type="file"
@@ -909,7 +954,7 @@ export default function ChatWindow({
             onClick={() => fileInputRef.current?.click()}
             title="Attach photo or video"
             aria-label="Attach photo or video"
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 flex-shrink-0"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="feather feather-plus">
               <path d="M12 5v14M5 12h14" />
@@ -922,7 +967,7 @@ export default function ChatWindow({
             onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
             title={isRecording ? "Stop recording" : "Record voice message"}
             aria-label={isRecording ? "Stop recording" : "Record voice"}
-            className={`w-10 h-10 flex items-center justify-center rounded-full ${
+            className={`w-10 h-10 flex items-center justify-center rounded-full flex-shrink-0 ${
               isRecording ? "bg-red-500 text-white animate-pulse" : "bg-gray-100 hover:bg-gray-200"
             }`}
           >
@@ -931,7 +976,7 @@ export default function ChatWindow({
             </svg>
           </button>
 
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <button
               type="button"
               onClick={() => setShowEmojiPicker((s) => !s)}
@@ -943,7 +988,7 @@ export default function ChatWindow({
             </button>
 
             {showEmojiPicker && (
-              <div className="absolute left-0 bottom-full mb-2 z-10 bg-white/70 backdrop-blur-sm border border-gray-200 rounded p-2 w-64 shadow-lg">
+              <div className="absolute left-0 bottom-full mb-2 z-10 bg-white/70 backdrop-blur-sm border border-gray-200 rounded p-2 w-64 max-w-lg shadow-lg">
                 {PickerComp ? (
                   // render the full picker when available
                   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -978,7 +1023,7 @@ export default function ChatWindow({
           </div>
 
           {fileObj ? (
-            <div className="text-sm text-muted truncate max-w-xs">{fileObj.name}</div>
+            <div className="text-xs sm:text-sm text-muted truncate max-w-xs flex-1">{fileObj.name}</div>
           ) : null}
 
           <input
@@ -989,9 +1034,9 @@ export default function ChatWindow({
             }}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="Type a message"
-            className="flex-1 border rounded px-3 py-2"
+            className="flex-1 min-w-0 border border-gray-300 rounded px-3 py-2 text-sm sm:text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <button onClick={handleSend} className="bg-green-500 text-white px-4 py-2 rounded">
+          <button onClick={handleSend} className="bg-green-500 text-white px-3 sm:px-4 py-2 rounded text-sm sm:text-base font-medium hover:bg-green-600 transition flex-shrink-0">
             Send
           </button>
         </div>

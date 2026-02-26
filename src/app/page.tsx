@@ -52,26 +52,39 @@ export default function Home() {
     );
   }
 
+  // hide the sidebar on small screens when we're viewing a chat or stories to avoid
+  // horizontal scrolling; users can tap a chat to drill in and use the back button
+  const hideSidebarOnMobile = !!selectedConversation || currentView === "stories";
+
+  const handleBack = () => {
+    setSelectedConversation(null);
+    setCurrentView("conversations");
+  };
+
   return (
     <div className="flex h-screen">
-      <Sidebar 
-        onSelectAction={setSelectedConversation} 
-        onStoriesClickAction={() => {
-          setCurrentView("stories");
-          setSelectedConversation(null);
-        }}
-        currentView={currentView}
-      />
+      {/* sidebar container */}
+      <div className={`${hideSidebarOnMobile ? 'hidden sm:flex' : 'flex'} flex-col` }>
+        <Sidebar 
+          onSelectAction={setSelectedConversation} 
+          onStoriesClickAction={() => {
+            setCurrentView("stories");
+            setSelectedConversation(null);
+          }}
+          currentView={currentView}
+        />
+      </div>
 
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
+      {/* main content area (chat / stories placeholder) */}
+      <div className={`flex-1 flex items-center justify-center bg-gray-50 ${hideSidebarOnMobile ? '' : 'hidden sm:flex'}`}>
         {currentView === "stories" ? (
           <StoriesViewer />
         ) : selectedConversation ? (
-          <ChatWindow conversationId={selectedConversation} />
+          <ChatWindow conversationId={selectedConversation} onBack={handleBack} />
         ) : (
           <div className="text-gray-400 text-center">
             <div className="text-5xl mb-4">💬</div>
-            <p>Select a chat to start messaging</p>
+            <p className="text-sm sm:text-base">Select a chat to start messaging</p>
           </div>
         )}
       </div>
